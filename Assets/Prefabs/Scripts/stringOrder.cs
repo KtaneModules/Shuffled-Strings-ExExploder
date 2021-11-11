@@ -131,9 +131,9 @@ public class stringOrder : MonoBehaviour {
 	}
 
 	bool IsOrderCorrect() {
-		bool IsIncorrect = true;
-		if (currentString != selectedString) IsIncorrect = false;
-		return IsIncorrect;
+		bool IsIncorrect = false;
+		if (currentString != selectedString) IsIncorrect = true;
+		return !IsIncorrect;
 	}
 
 	//twitch plays
