@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -11,11 +12,13 @@ public class stringOrder : MonoBehaviour {
 	private KMNeedyModule NeedyModule;
 	private KMAudio BombAudio;
 
+	private Color selected = new Color(0.988f, 1f, 0.278f, 1f);
+	private Color unselected = new Color(1f, 1f, 1f, 1f);
+
 	static int IDCounter = 1;
 	int ModuleID;
-	MonoRandom rng;
 
-	private GameObject[] SelectedChars = new GameObject[2];
+	private int?[] SelectedChars = new int?[2];
 
 	string[] Strings = {
 		"ABCDEFGHIJ",
@@ -31,58 +34,44 @@ public class stringOrder : MonoBehaviour {
 		"ABCZYX1230"
 	};
 
+	private string currentString;
+	private string selectedString;
+
+	private bool ModActive;
+
 	public void Setup()
 	{
 		ModuleID = IDCounter++;
-		rng = GetComponent<KMRuleSeedable> ().GetRNG ();
-		SelectString ();
-		Scramble ();
 	}
 
 	public void OnActivate() {
+		ModActive = true;
+		SelectString ();
 		Scramble ();
 	}
 
 	protected void OnTimerExpired()
 	{
+		ModActive = false;
 		DebugMsg ("Defuser failed to sort the string in time.");
-		GetComponent<KMNeedyModule>().OnStrike();
+		NeedyModule.OnStrike();
 	}
 
 	void SelectString() {
-		int i = (int)Random.Range (0,Strings.Length);
-		char[] Chars = Strings[i].ToCharArray();
-		for (int c = 0; c < CharTexts.Length; c++) {
-			CharTexts [c].text = Chars [c].ToString();
-		}
-		DebugMsg ("String " + Strings[i] + " has been selected");
+		int i = Random.Range (0,Strings.Length);
+		selectedString = Strings[i];
+		currentString = Strings[i];
+		DebugMsg ("String " + selectedString + " has been selected.");
 	}
 
 	void Scramble() {
-		MonoRandom rng = GetComponent<KMRuleSeedable> ().GetRNG ();
-		Vector3[] loc = new Vector3[Characters.Length];
-		for (int i = 0; i < loc.Length; i++) {
-			loc [i] = Characters [i].transform.position;
+		char[] scrambledChars = currentString.ToCharArray().Shuffle();
+		while (scrambledChars.Join("") == selectedString)
+			scrambledChars = currentString.ToCharArray().Shuffle();
+		for (int c = 0; c < CharTexts.Length; c++) {
+			CharTexts[c].text = scrambledChars[c].ToString();
 		}
-		loc = Shuffle (loc);
-		for (int i = 0; i < loc.Length; i++) {
-			setX (Characters [i], loc [i]);
-		}
-	}
-
-	Vector3[] Shuffle(Vector3[] x) {
-		Vector3[] o = x;
-		for (int i = 0; i < x.Length; i++) {
-			int j = Random.Range (0, i + 1);
-			if (i != j) {
-				Vector3 temp = o [i];
-				o [i] = o [j];
-				o [j] = temp;
-			} else {
-				j = (i + 1) % x.Length;
-			}
-		}
-		return o;
+		currentString = scrambledChars.Join("");
 	}
 
 	void Awake() {
@@ -91,13 +80,14 @@ public class stringOrder : MonoBehaviour {
 			KMSelectable CharSelectable = Char.GetComponent<KMSelectable> ();
 			CharSelectable.OnInteract += () =>
 			{
-				if(Char != SelectedChars[0]) {
-					ButtonPress(CharSelectable);
-					SelectedChars[1] = SelectedChars[0];
-					SelectedChars[0] = Char;
-					if(SelectedChars[1] != null) {
-						Swap();
-					}
+				int index = Array.IndexOf(Characters, Char);
+				ButtonPress(CharSelectable);
+				CharTexts[index].color = selected;
+				SelectedChars[1] = SelectedChars[0];
+				SelectedChars[0] = index;
+				if (SelectedChars[1] != null)
+				{
+					Swap();
 				}
 				return false;
 			};
@@ -111,18 +101,28 @@ public class stringOrder : MonoBehaviour {
 	void ButtonPress(KMSelectable Selectable)
 	{
 		Selectable.AddInteractionPunch(0.5f);
-		BombAudio.PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonPress, transform);
+		BombAudio.PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonPress, Selectable.transform);
 	}
 
 	bool Swap() {
-		Vector3 loc0 = SelectedChars [0].transform.position;
-		Vector3 loc1 = SelectedChars [1].transform.position;
-		setX (SelectedChars [0], loc1);
-		setX (SelectedChars [1], loc0);
-		if (IsOrderCorrect ()) {
-			NeedyModule.OnPass();
+		string store = CharTexts[(int)SelectedChars[0]].text;
+		CharTexts[(int)SelectedChars[0]].text = CharTexts[(int)SelectedChars[1]].text;
+		CharTexts[(int)SelectedChars[1]].text = store;
+		CharTexts[(int)SelectedChars[0]].color = unselected;
+		CharTexts[(int)SelectedChars[1]].color = unselected;
+		string newString = "";
+		for (int c = 0; c < CharTexts.Length; c++)
+		{
+			newString += CharTexts[c].text;
 		}
-		SelectedChars = new GameObject[2];
+		currentString = newString;
+		if (IsOrderCorrect () && ModActive) {
+			DebugMsg("Defuser successfully sorted the string.");
+			NeedyModule.OnPass();
+			ModActive = false;
+		}
+		SelectedChars[0] = null;
+		SelectedChars[1] = null;
 		return false;
 	}
 
@@ -131,16 +131,72 @@ public class stringOrder : MonoBehaviour {
 	}
 
 	bool IsOrderCorrect() {
-		bool IsIncorrect = false;
-		for (int i = 0; i < Characters.Length - 1; i++) {
-			IsIncorrect |= (Characters [i].transform.position.x > Characters [i + 1].transform.position.x);
-		}
-		return !IsIncorrect;
+		bool IsIncorrect = true;
+		if (currentString != selectedString) IsIncorrect = false;
+		return IsIncorrect;
 	}
 
-	void setX(GameObject obj, Vector3 loc) {
-		Transform t = obj.transform;
-		Quaternion rot = t.rotation;
-		obj.transform.SetPositionAndRotation (loc, rot);
+	//twitch plays
+	#pragma warning disable 414
+	private readonly string TwitchHelpMessage = @"!{0} swap <0-9><0-9> [Swaps the two specified characters from left to right] | Command can be chained, for ex: !{0} swap 04;58;23";
+	#pragma warning restore 414
+	IEnumerator ProcessTwitchCommand(string command)
+	{
+		string[] parameters = command.Split(' ');
+		if (Regex.IsMatch(parameters[0], @"^\s*swap\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+		{
+            if (parameters.Length == 2)
+            {
+				string[] pairs = parameters[1].Split(';');
+				for (int i = 0; i < pairs.Length; i++)
+                {
+					if (pairs[i].Length != 2)
+						yield break;
+					int temp = -1;
+					if (!int.TryParse(pairs[i], out temp))
+						yield break;
+					if (temp < 0 || temp > 99)
+						yield break;
+				}
+				yield return null;
+				for (int i = 0; i < pairs.Length; i++)
+				{
+					Characters[pairs[i][0] - '0'].GetComponent<KMSelectable>().OnInteract();
+					yield return new WaitForSeconds(.1f);
+					Characters[pairs[i][1] - '0'].GetComponent<KMSelectable>().OnInteract();
+					yield return new WaitForSeconds(.1f);
+				}
+			}
+		}
+	}
+
+	void TwitchHandleForcedSolve()
+	{
+		StartCoroutine(DealWithNeedy());
+	}
+
+	private IEnumerator DealWithNeedy()
+	{
+		while (true)
+		{
+			while (!ModActive) { yield return null; }
+			if (SelectedChars[0] != null)
+            {
+				int correctIndex = selectedString.IndexOf(currentString[(int)SelectedChars[0]]);
+				Characters[correctIndex].GetComponent<KMSelectable>().OnInteract();
+				yield return new WaitForSeconds(.1f);
+			}
+			for (int i = 0; i < 10; i++)
+            {
+				if (currentString[i] != selectedString[i])
+                {
+					Characters[i].GetComponent<KMSelectable>().OnInteract();
+					yield return new WaitForSeconds(.1f);
+					int correctIndex = selectedString.IndexOf(currentString[i]);
+					Characters[correctIndex].GetComponent<KMSelectable>().OnInteract();
+					yield return new WaitForSeconds(.1f);
+				}
+            }
+		}
 	}
 }
